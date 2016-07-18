@@ -8,6 +8,7 @@
 
 import SpriteKit
 import CoreMotion
+import AVFoundation
 
 struct Physics{
     static let player : UInt32 = 0x1 << 1
@@ -18,24 +19,52 @@ struct Physics{
 
 
 class GameScene: SKScene, SKPhysicsContactDelegate{
-    
+    var deathSound = NSURL(fileURLWithPath: NSBundle.mainBundle().pathForResource("death", ofType: "mp3")!)
+    var bgMusic = NSURL(fileURLWithPath: NSBundle.mainBundle().pathForResource("background", ofType: "mp3")!)
+    var audioPlayer = AVAudioPlayer()
+    var backgroundPlayer = AVAudioPlayer()
     let manager = CMMotionManager()
     var player = SKSpriteNode()
     var Ground = SKSpriteNode()
     var topWall = SKSpriteNode()
     var btmWall = SKSpriteNode()
+    var volBtn = SKSpriteNode()
     var wallPair = SKNode()
     var leftwall = SKSpriteNode()
     var rightwall = SKSpriteNode()
     var startbutton = SKNode()
     var restartbutton = SKNode()
     var moveAndRemove = SKAction()
+    var playing = false
     var destX: CGFloat  = 0.0
     var dextY: CGFloat = 0.0
     var start = false
     var dead = false
     
     func createWorld() {
+        volBtn = SKSpriteNode(imageNamed: "volume")
+        volBtn.size = CGSize(width: 50, height: 50)
+        volBtn.position = CGPoint(x: self.frame.width - 100, y: self.frame.height - 170)
+        volBtn.zPosition = 12
+        self.addChild(volBtn)
+//        do {
+            //            audioPlayer = try AVAudioPlayer(contentsOfURL: jumpSound)
+            //            audioPlayer.volume = 0.1
+            //            audioPlayer.prepareToPlay()
+            //        }
+            //        catch let error {
+            //            // handle error
+            //        }
+            //        audioPlayer.prepareToPlay()
+        do{
+            audioPlayer = try AVAudioPlayer(contentsOfURL: deathSound)
+            audioPlayer.prepareToPlay()
+        }
+        catch let error {
+            // handle error
+        }
+   
+
         self.physicsWorld.contactDelegate = self
         
         /* Setup your scene here */
@@ -66,7 +95,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         self.addChild(leftwall)
         rightwall = SKSpriteNode(imageNamed:"Wall")
         rightwall.size = CGSize(width: 100, height: self.frame.height)
-        rightwall.position = CGPoint(x: self.frame.width + rightwall.frame.width/2, y: rightwall.frame.height/2)
+        rightwall.position = CGPoint(x: self.frame.width, y: rightwall.frame.height/2)
         rightwall.physicsBody = SKPhysicsBody(rectangleOfSize: rightwall.size)
         rightwall.physicsBody?.categoryBitMask = Physics.leftwall
         rightwall.physicsBody?.collisionBitMask = Physics.player
@@ -74,6 +103,19 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         rightwall.physicsBody?.dynamic = false
         rightwall.physicsBody?.affectedByGravity = false
         self.addChild(rightwall)
+        let burstPath2 = NSBundle.mainBundle().pathForResource(
+            "fire", ofType: "sks")
+        
+        if burstPath2 != nil {
+            let burstNode2 =
+                NSKeyedUnarchiver.unarchiveObjectWithFile(burstPath2!)
+                    as! SKEmitterNode
+            burstNode2.position = CGPointMake(rightwall.position.x, 50)
+            burstNode2.zPosition = 7
+            self.addChild(burstNode2)
+            
+        }
+
 
         
         Ground = SKSpriteNode(imageNamed:"Ground")
@@ -87,7 +129,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         Ground.zPosition = 3
         self.addChild(Ground)
         
-        player = SKSpriteNode(imageNamed: "Megaman")
+        player = SKSpriteNode(imageNamed: "MegaChoi")
         player.position = CGPoint(x: size.width * 0.4, y: size.width * 0.3)
         player.setScale(0.5)
         player.physicsBody = SKPhysicsBody(circleOfRadius: player.frame.height / 2)
@@ -102,6 +144,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
     }
     
     func startGame(){
+        
+        
         manager.startAccelerometerUpdates()
         manager.accelerometerUpdateInterval = 0.02
         manager.startAccelerometerUpdatesToQueue(NSOperationQueue()){
@@ -181,6 +225,7 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         
         if firstBody.categoryBitMask == Physics.player && secondBody.categoryBitMask == Physics.leftwall || secondBody.categoryBitMask == Physics.player && firstBody.categoryBitMask == Physics.leftwall{
             dead = true
+            audioPlayer.play()
             let burstPath = NSBundle.mainBundle().pathForResource(
                 "smoke", ofType: "sks")
             
@@ -221,17 +266,40 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
             if start == false{
                 if startbutton.containsPoint(location){
                     start = true
+                    playing = true
                     self.startbutton.removeFromParent()
+                    do{
+                        backgroundPlayer = try AVAudioPlayer(contentsOfURL: bgMusic)
+                        backgroundPlayer.volume = 0.8
+                        backgroundPlayer.numberOfLoops = -1
+                        backgroundPlayer.prepareToPlay()
+                        backgroundPlayer.play()
+                    }
+                    catch let error {
+                        // handle error
+                    }
                     startGame()
                 }
             }
             else{
                 if restartbutton.containsPoint(location){
-                    dead = true
+                    dead = false
                     start = false
                     self.restartbutton.removeFromParent()
                     restartScene()
                     
+                }
+                else if volBtn.containsPoint(location){
+                    if playing == true{
+                        volBtn.texture = SKTexture(imageNamed:"Mute")
+                        backgroundPlayer.stop()
+                        playing = false
+                    }
+                    else{
+                        volBtn.texture = SKTexture(imageNamed:"volume")
+                        backgroundPlayer.play()
+                        playing = true
+                    }
                 }
             }
         }
@@ -263,8 +331,8 @@ class GameScene: SKScene, SKPhysicsContactDelegate{
         let topWall = SKSpriteNode(imageNamed: "Wall")
         let btmWall = SKSpriteNode(imageNamed: "Wall")
         
-        topWall.position = CGPoint(x: self.frame.width + 25, y: self.frame.height / 2 + 350)
-        btmWall.position = CGPoint(x: self.frame.width + 25, y: self.frame.height / 2 - 350)
+        topWall.position = CGPoint(x: self.frame.width + 25, y: self.frame.height / 2 + 380)
+        btmWall.position = CGPoint(x: self.frame.width + 25, y: self.frame.height / 2 - 400)
         
         topWall.setScale(0.5)
         btmWall.setScale(0.5)
