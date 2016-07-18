@@ -7,39 +7,298 @@
 //
 
 import SpriteKit
+import CoreMotion
 
-class GameScene: SKScene {
-    override func didMoveToView(view: SKView) {
-        /* Setup your scene here */
-        let myLabel = SKLabelNode(fontNamed:"Chalkduster")
-        myLabel.text = "Hello, World!"
-        myLabel.fontSize = 45
-        myLabel.position = CGPoint(x:CGRectGetMidX(self.frame), y:CGRectGetMidY(self.frame))
+struct Physics{
+    static let player : UInt32 = 0x1 << 1
+    static let Ground : UInt32 = 0x1 << 2
+    static let Wall : UInt32 = 0x1 << 3
+    static let leftwall : UInt32 = 0x1 << 4
+}
+
+
+class GameScene: SKScene, SKPhysicsContactDelegate{
+    
+    let manager = CMMotionManager()
+    var player = SKSpriteNode()
+    var Ground = SKSpriteNode()
+    var topWall = SKSpriteNode()
+    var btmWall = SKSpriteNode()
+    var wallPair = SKNode()
+    var leftwall = SKSpriteNode()
+    var rightwall = SKSpriteNode()
+    var startbutton = SKNode()
+    var restartbutton = SKNode()
+    var moveAndRemove = SKAction()
+    var destX: CGFloat  = 0.0
+    var dextY: CGFloat = 0.0
+    var start = false
+    var dead = false
+    
+    func createWorld() {
+        self.physicsWorld.contactDelegate = self
         
-        self.addChild(myLabel)
+        /* Setup your scene here */
+        
+        
+        leftwall = SKSpriteNode(imageNamed:"Wall")
+        leftwall.size = CGSize(width: 100, height: self.frame.height)
+        leftwall.position = CGPoint(x: leftwall.frame.width/6, y: leftwall.frame.height/2)
+        leftwall.physicsBody = SKPhysicsBody(rectangleOfSize: leftwall.size)
+        leftwall.physicsBody?.categoryBitMask = Physics.leftwall
+        leftwall.physicsBody?.collisionBitMask = Physics.player
+        leftwall.physicsBody?.contactTestBitMask = Physics.player
+        leftwall.physicsBody?.dynamic = false
+        leftwall.physicsBody?.affectedByGravity = false
+        let burstPath = NSBundle.mainBundle().pathForResource(
+            "fire", ofType: "sks")
+        
+        if burstPath != nil {
+            let burstNode =
+                NSKeyedUnarchiver.unarchiveObjectWithFile(burstPath!)
+                    as! SKEmitterNode
+            burstNode.position = CGPointMake(leftwall.position.x, 50)
+            burstNode.zPosition = 7
+            self.addChild(burstNode)
+            
+        }
+
+        self.addChild(leftwall)
+        rightwall = SKSpriteNode(imageNamed:"Wall")
+        rightwall.size = CGSize(width: 100, height: self.frame.height)
+        rightwall.position = CGPoint(x: self.frame.width + rightwall.frame.width/2, y: rightwall.frame.height/2)
+        rightwall.physicsBody = SKPhysicsBody(rectangleOfSize: rightwall.size)
+        rightwall.physicsBody?.categoryBitMask = Physics.leftwall
+        rightwall.physicsBody?.collisionBitMask = Physics.player
+        rightwall.physicsBody?.contactTestBitMask = Physics.player
+        rightwall.physicsBody?.dynamic = false
+        rightwall.physicsBody?.affectedByGravity = false
+        self.addChild(rightwall)
+
+        
+        Ground = SKSpriteNode(imageNamed:"Ground")
+        Ground.position = CGPoint(x: self.frame.width / 2, y: 0 + Ground.frame.height)
+        Ground.physicsBody = SKPhysicsBody(rectangleOfSize: Ground.size)
+        Ground.physicsBody?.categoryBitMask = Physics.Ground
+        Ground.physicsBody?.collisionBitMask = Physics.player
+        Ground.physicsBody?.contactTestBitMask = Physics.player
+        Ground.physicsBody?.affectedByGravity = false
+        Ground.physicsBody?.dynamic = false
+        Ground.zPosition = 3
+        self.addChild(Ground)
+        
+        player = SKSpriteNode(imageNamed: "Megaman")
+        player.position = CGPoint(x: size.width * 0.4, y: size.width * 0.3)
+        player.setScale(0.5)
+        player.physicsBody = SKPhysicsBody(circleOfRadius: player.frame.height / 2)
+        player.physicsBody?.categoryBitMask = Physics.player
+        player.physicsBody?.collisionBitMask = Physics.Ground | Physics.Wall | Physics.leftwall
+        player.physicsBody?.contactTestBitMask = Physics.Ground | Physics.Wall | Physics.leftwall
+        player.physicsBody?.affectedByGravity = true
+        player.physicsBody?.dynamic = true
+        
+        self.addChild(player)
+        
     }
     
-    override func touchesBegan(touches: Set<UITouch>, withEvent event: UIEvent?) {
-       /* Called when a touch begins */
+    func startGame(){
+        manager.startAccelerometerUpdates()
+        manager.accelerometerUpdateInterval = 0.02
+        manager.startAccelerometerUpdatesToQueue(NSOperationQueue()){
+            (data, error) in
+            if self.start == true {
+                self.physicsWorld.gravity = CGVectorMake(CGFloat((data?.acceleration.y)!) * 10,
+                                                         -9.81)
+            }
+            
+        }
+        if manager.deviceMotionAvailable {
+            manager.deviceMotionUpdateInterval = 0.02
+            manager.startDeviceMotionUpdatesToQueue(NSOperationQueue.currentQueue()!, withHandler:{
+                data, error in
+                if self.start == true {
+                    if data?.userAcceleration.z < -1.8 {
+                        self.player.physicsBody?.velocity = CGVectorMake(0,0)
+                        self.player.physicsBody?.applyImpulse(CGVectorMake(0, 500))
+                    }
+                }
+                
+            })
+        }
         
-        for touch in touches {
+        if self.start == true{
+            let spawn = SKAction.runBlock({
+                () in
+                self.createWalls()
+                
+            })
+            
+            let delay = SKAction.waitForDuration(2.0)
+            let SpawnDelay = SKAction.sequence([spawn, delay])
+            let SpawnDelayForever = SKAction.repeatActionForever(SpawnDelay)
+            self.runAction(SpawnDelayForever)
+            
+            let distance = CGFloat(self.frame.width + wallPair.frame.width)
+            let movePipes = SKAction.moveByX(-distance - 40, y:0, duration: NSTimeInterval(0.01 * distance))
+            let removePipes = SKAction.removeFromParent()
+            moveAndRemove = SKAction.sequence([movePipes, removePipes])
+        }
+
+    }
+    
+    func restartScene(){
+        self.removeAllChildren()
+        self.removeAllActions()
+        start = true
+        createWorld()
+        startGame()
+    }
+
+    
+    override func didMoveToView(view: SKView) {
+        createWorld()
+        startbutton = SKNode()
+        let startbackground = SKSpriteNode(color: SKColor.blackColor(), size: CGSize(width: 200, height:100))
+        startbackground.position = CGPoint(x: self.frame.width / 2, y: self.frame.height / 2)
+        startbackground.zPosition = 6
+        startbutton.addChild(startbackground)
+        
+        let startLabel = SKLabelNode()
+        startLabel.position = CGPoint(x: self.frame.width / 2, y: self.frame.height / 2 - 20)
+        startLabel.text = "Start"
+        startLabel.fontSize = 40
+        startLabel.zPosition = 7
+        startbutton.addChild(startLabel)
+        self.addChild(startbutton)
+
+    }
+    
+    func didBeginContact(contact: SKPhysicsContact) {
+        
+        let firstBody = contact.bodyA
+        let secondBody = contact.bodyB
+        
+        
+        if firstBody.categoryBitMask == Physics.player && secondBody.categoryBitMask == Physics.leftwall || secondBody.categoryBitMask == Physics.player && firstBody.categoryBitMask == Physics.leftwall{
+            dead = true
+            let burstPath = NSBundle.mainBundle().pathForResource(
+                "smoke", ofType: "sks")
+            
+            if burstPath != nil {
+                let burstNode =
+                    NSKeyedUnarchiver.unarchiveObjectWithFile(burstPath!)
+                        as! SKEmitterNode
+                burstNode.position = CGPointMake(player.position.x, player.position.y)
+                burstNode.zPosition = 7
+                self.addChild(burstNode)
+                
+            }
+            self.player.removeFromParent()
+            restartbutton = SKNode()
+            let startbackground = SKSpriteNode(color: SKColor.blackColor(), size: CGSize(width: 200, height:100))
+            startbackground.position = CGPoint(x: self.frame.width / 2, y: self.frame.height / 2)
+            startbackground.zPosition = 6
+            restartbutton.addChild(startbackground)
+            
+            let startLabel = SKLabelNode()
+            startLabel.position = CGPoint(x: self.frame.width / 2, y: self.frame.height / 2 - 20)
+            startLabel.text = "Restart"
+            startLabel.fontSize = 40
+            startLabel.zPosition = 7
+            restartbutton.addChild(startLabel)
+            self.addChild(restartbutton)
+
+
+        }
+        
+        
+        
+    }
+    override func touchesBegan(touches: Set<UITouch>, withEvent event: UIEvent?) {
+            for touch in touches {
             let location = touch.locationInNode(self)
             
-            let sprite = SKSpriteNode(imageNamed:"Spaceship")
-            
-            sprite.xScale = 0.5
-            sprite.yScale = 0.5
-            sprite.position = location
-            
-            let action = SKAction.rotateByAngle(CGFloat(M_PI), duration:1)
-            
-            sprite.runAction(SKAction.repeatActionForever(action))
-            
-            self.addChild(sprite)
+            if start == false{
+                if startbutton.containsPoint(location){
+                    start = true
+                    self.startbutton.removeFromParent()
+                    startGame()
+                }
+            }
+            else{
+                if restartbutton.containsPoint(location){
+                    dead = true
+                    start = false
+                    self.restartbutton.removeFromParent()
+                    restartScene()
+                    
+                }
+            }
         }
     }
+
    
     override func update(currentTime: CFTimeInterval) {
-        /* Called before each frame is rendered */
+        
     }
+    func createWalls(){
+        
+//        let scoreNode = SKSpriteNode()
+//        
+//        scoreNode.size = CGSize(width:1, height: 200)
+//        scoreNode.position = CGPoint(x: self.frame.width + 25, y: self.frame.height / 2)
+//        scoreNode.physicsBody = SKPhysicsBody(rectangleOfSize: scoreNode.size)
+//        scoreNode.physicsBody?.affectedByGravity = false
+//        scoreNode.physicsBody?.dynamic = false
+//        scoreNode.physicsBody?.categoryBitMask = Physics.Score
+//        scoreNode.physicsBody?.collisionBitMask = 0
+//        scoreNode.physicsBody?.contactTestBitMask = Physics.Ghost
+        
+//        wallPair = SKNode()
+        
+        
+        wallPair = SKNode()
+        
+        
+        let topWall = SKSpriteNode(imageNamed: "Wall")
+        let btmWall = SKSpriteNode(imageNamed: "Wall")
+        
+        topWall.position = CGPoint(x: self.frame.width + 25, y: self.frame.height / 2 + 350)
+        btmWall.position = CGPoint(x: self.frame.width + 25, y: self.frame.height / 2 - 350)
+        
+        topWall.setScale(0.5)
+        btmWall.setScale(0.5)
+        
+        topWall.physicsBody = SKPhysicsBody(rectangleOfSize: topWall.size)
+        topWall.physicsBody?.categoryBitMask = Physics.Wall
+        topWall.physicsBody?.collisionBitMask = Physics.player
+        topWall.physicsBody?.contactTestBitMask = Physics.player
+        topWall.physicsBody?.dynamic = false
+        topWall.physicsBody?.affectedByGravity = false
+        
+        btmWall.physicsBody = SKPhysicsBody(rectangleOfSize: btmWall.size)
+        btmWall.physicsBody?.categoryBitMask = Physics.Wall
+        btmWall.physicsBody?.collisionBitMask = Physics.player
+        btmWall.physicsBody?.contactTestBitMask = Physics.player
+        btmWall.physicsBody?.dynamic = false
+        btmWall.physicsBody?.affectedByGravity = false
+        
+        
+        topWall.zRotation = CGFloat(M_PI)
+        
+        wallPair.addChild(topWall)
+        wallPair.addChild(btmWall)
+        wallPair.zPosition = 1
+        
+        var randomPosition = CGFloat.random(min: -50, max: 200)
+        wallPair.position.y = wallPair.position.y + randomPosition
+        
+        
+        wallPair.runAction(moveAndRemove)
+        
+        self.addChild(wallPair)
+        
+    }
+
 }
+
